@@ -3,6 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- iPad: als App vom Home-Bildschirm ohne Safari-Leiste starten -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Monitor">
+<meta name="theme-color" content="#000000">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="manifest" href="manifest.webmanifest">
 <title>Patientenmonitor</title>
 <style>
   :root{
@@ -965,6 +973,12 @@ refresh();
 requestAnimationFrame(frame);
 window.addEventListener("load", () => setTimeout(resize, 200));
 })();
+</script>
+<script>
+// Offline-Speicher starten (nur über https, z. B. GitHub Pages; lokal per Doppelklick passiert nichts)
+if ("serviceWorker" in navigator && location.protocol === "https:") {
+  navigator.serviceWorker.register("sw.js").catch(() => {});
+}
 </script>
 </body>
 </html>
