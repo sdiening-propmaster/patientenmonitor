@@ -1,0 +1,970 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Patientenmonitor</title>
+<style>
+  :root{
+    --ecg:#22ff5a;
+    --spo2:#31e7ff;
+    --art:#ff3b3b;
+    --co2:#f2f2f2;
+    --resp:#ffe234;
+    --nibp:#ffffff;
+    --temp:#ff9f2e;
+    --panel:#0b0d10;
+    --line:#1d2430;
+    --dim:#7d8794;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;background:#000;overflow:hidden}
+  body{
+    font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;
+    color:#e8edf2;
+    -webkit-font-smoothing:antialiased;
+    cursor:default;
+    user-select:none;
+  }
+  #app{display:flex;flex-direction:column;height:100vh;height:100dvh;width:100vw}
+
+  /* ---------- Kopfzeile ---------- */
+  header{
+    display:flex;align-items:center;gap:1.4vw;
+    padding:0.6vh 1vw;background:linear-gradient(#141a22,#0a0e13);
+    border-bottom:1px solid var(--line);flex:0 0 auto;overflow:hidden;white-space:nowrap;
+  }
+  .bed{
+    letter-spacing:.14em;color:#9fb0c0;border:1px solid #2a3543;
+    padding:.4vh .8vw;border-radius:3px;background:#101720;
+  }
+  #patName{
+    font-weight:600;letter-spacing:.04em;color:#fff;
+    padding:2px 8px;border:1px solid transparent;border-radius:3px;min-width:100px;
+    outline:none;
+  }
+  #patName:hover{border-color:#2c3a4a}
+  #patName:focus{border-color:var(--spo2);background:#0d1a20}
+  .meta{display:flex;gap:1.1vw;color:#95a3b2}
+  .meta span b{color:#dbe4ec;font-weight:500}
+  .editable{border-bottom:1px dashed #33414f;outline:none;padding:0 2px;cursor:text}
+  .editable:focus{background:#0d1a20;border-color:var(--spo2);color:#fff}
+  .spacer{flex:1}
+  #alarmBanner{
+    font-weight:600;letter-spacing:.1em;padding:.4vh .9vw;border-radius:3px;
+    background:#2a0d0d;color:#ff5a5a;border:1px solid #5c1c1c;opacity:0;transition:opacity .15s;
+  }
+  #alarmBanner.on{opacity:1}
+  #alarmBanner.blink{animation:blink .7s steps(1,end) infinite}
+  @keyframes blink{50%{opacity:.25}}
+  .clock{font-variant-numeric:tabular-nums;color:#cfd9e3;letter-spacing:.04em}
+  .clock small{display:block;color:#6f7d8b;letter-spacing:.1em;text-align:right}
+  .statusIcons{display:flex;gap:.6vw;color:#5d6a77;letter-spacing:.1em}
+  .statusIcons .on{color:var(--ecg)}
+
+  /* ---------- Hauptbereich ---------- */
+  main{display:flex;flex:1 1 auto;min-height:0}
+  #waves{flex:1 1 auto;display:flex;flex-direction:column;min-width:0;background:#000}
+  .lane{position:relative;flex:1 1 0;min-height:0;border-bottom:1px solid #10161d;overflow:hidden}
+  .lane.grid::before{
+    content:"";position:absolute;inset:0;pointer-events:none;opacity:.5;
+    background-image:
+      linear-gradient(to right,#131b24 1px,transparent 1px),
+      linear-gradient(to bottom,#131b24 1px,transparent 1px);
+    background-size:40px 40px;
+  }
+  .lane canvas{position:absolute;inset:0;width:100%;height:100%}
+  .laneLabel{
+    position:absolute;left:.6vw;top:4px;letter-spacing:.12em;font-weight:600;
+    z-index:3;text-shadow:0 0 6px #000;
+  }
+  .laneSub{position:absolute;left:.6vw;color:#66727e;letter-spacing:.1em;z-index:3}
+
+  /* ---------- Zahlenfelder ---------- */
+  #nums{
+    display:flex;flex-direction:column;gap:2px;
+    background:#05070a;border-left:1px solid var(--line);padding:2px;overflow:hidden;
+  }
+  .box{
+    position:relative;flex:1 1 0;min-height:0;background:var(--panel);border:1px solid #141b24;
+    border-radius:3px;padding:2px .7vw 2px .8vw;display:flex;flex-direction:column;justify-content:center;
+    overflow:hidden;
+  }
+  .box .lbl{letter-spacing:.14em;font-weight:600;display:flex;gap:.5vw;align-items:baseline}
+  .box .unit{color:#67727e;letter-spacing:.08em;font-weight:400}
+  .box .limits{position:absolute;right:.7vw;top:5px;color:#4e5964;text-align:right;line-height:1.25}
+  .box .val{
+    font-weight:600;line-height:.98;font-variant-numeric:tabular-nums;
+    letter-spacing:-.02em;text-align:right;padding-right:2px;
+  }
+  .box .sub{color:#7f8b98;text-align:right;font-variant-numeric:tabular-nums}
+  .box.sel{border-color:#4ea9ff;box-shadow:0 0 0 1px #4ea9ff inset,0 0 14px rgba(78,169,255,.28)}
+  .box .key{
+    position:absolute;left:4px;top:4px;font-size:9px;color:#3f4b57;border:1px solid #232d38;
+    border-radius:2px;width:13px;height:13px;display:flex;align-items:center;justify-content:center;
+  }
+  .box.sel .key{color:#4ea9ff;border-color:#4ea9ff}
+  .box.alarm{animation:boxAlarm .7s steps(1,end) infinite}
+  @keyframes boxAlarm{50%{background:#2a0d0d;border-color:#7a2020}}
+
+  /* ---------- Fußzeile ---------- */
+  footer{
+    flex:0 0 auto;display:flex;gap:1.1vw;align-items:center;padding:.5vh 1vw;
+    background:#0a0e13;border-top:1px solid var(--line);font-size:11px;color:#6f7d8b;
+    letter-spacing:.06em;white-space:nowrap;overflow:hidden;
+  }
+  footer kbd{
+    background:#161e27;border:1px solid #2a3542;border-radius:3px;padding:1px 5px;color:#b9c6d2;
+    font-family:inherit;font-size:10px;margin:0 1px;
+  }
+  footer .grp{white-space:nowrap}
+
+  /* ---------- Hilfe ---------- */
+  #help{position:fixed;inset:0;background:rgba(2,4,7,.93);z-index:50;display:none;
+        align-items:center;justify-content:center;padding:3vh 3vw}
+  #help.on{display:flex}
+  #help .card{border:1px solid #223040;background:#0a0e13;border-radius:6px;
+              padding:3vh 3vw;max-width:960px;width:100%;max-height:94vh;overflow:auto}
+  #help h2{font-size:clamp(13px,2.1vh,18px);letter-spacing:.14em;color:#fff;margin-bottom:4px;font-weight:600}
+  #help p.hint{font-size:clamp(9px,1.4vh,12px);color:#6f7d8b;margin-bottom:2vh}
+  #help .cols{display:grid;grid-template-columns:1fr 1fr;gap:2.4vw}
+  #help h3{font-size:clamp(8px,1.3vh,11px);letter-spacing:.18em;color:#4ea9ff;margin:1.6vh 0 .8vh;font-weight:600}
+  #help h3:first-child{margin-top:0}
+  #help table{width:100%;border-collapse:collapse;font-size:clamp(10px,1.6vh,13px)}
+  #help td{padding:.35vh 0;color:#c3cedb;vertical-align:top}
+  #help td:first-child{width:44%;color:#8b98a6}
+  #help kbd{background:#161e27;border:1px solid #2a3542;border-radius:3px;padding:1px 6px;
+            color:#e8edf2;font-family:inherit;margin-right:3px;display:inline-block}
+  #toast{
+    position:fixed;left:50%;bottom:52px;transform:translateX(-50%);background:#111a24;
+    border:1px solid #2b3947;color:#dbe6f0;padding:7px 16px;border-radius:4px;font-size:13px;
+    letter-spacing:.06em;opacity:0;transition:opacity .25s;pointer-events:none;z-index:60;
+  }
+  #toast.on{opacity:1}
+  .frozen #waves{filter:saturate(.4) brightness(.8)}
+
+  /* ---------- BÜHNENMODUS: nur die reine Monitoroberfläche ---------- */
+  body.clean footer{display:none}
+  body.clean .box .key{display:none}
+  body.clean .box.sel{border-color:#141b24;box-shadow:none}
+  body.clean.showsel .box.sel{border-color:#4ea9ff;box-shadow:0 0 0 1px #4ea9ff inset,0 0 14px rgba(78,169,255,.28)}
+  body.clean .editable{border-bottom-color:transparent}
+  body.clean #patName:hover{border-color:transparent}
+  body.clean.hidecursor,body.clean.hidecursor *{cursor:none !important}
+  #startHint{
+    position:fixed;right:1vw;bottom:1.2vh;font-size:11px;letter-spacing:.14em;color:#3d4854;
+    z-index:40;transition:opacity 1s;
+  }
+  #startHint.off{opacity:0}
+
+  /* ---------- Auflösungsunabhängig: alles skaliert mit dem Bildschirm ---------- */
+  #nums{flex:0 0 clamp(180px, 19vw, 340px)}
+  #patName{font-size:clamp(14px, 2.6vh, 26px)}
+  .bed{font-size:clamp(8px, 1.4vh, 13px)}
+  .meta{font-size:clamp(8px, 1.35vh, 13px)}
+  .clock{font-size:clamp(12px, 2.2vh, 21px)}
+  .clock small{font-size:clamp(7px, 1.15vh, 11px)}
+  #alarmBanner{font-size:clamp(10px, 1.7vh, 16px)}
+  .statusIcons{font-size:clamp(7px, 1.15vh, 11px)}
+  .box .val{font-size:clamp(20px, 6.4vh, 58px)}
+  .box.small .val{font-size:clamp(17px, 4.9vh, 42px)}
+  .box .lbl{font-size:clamp(7px, 1.25vh, 12px)}
+  .box .unit,.box .limits{font-size:clamp(6px, 1.05vh, 10px)}
+  .box .sub{font-size:clamp(7px, 1.3vh, 12px)}
+  .laneLabel{font-size:clamp(8px, 1.3vh, 13px)}
+  .laneSub{font-size:clamp(6px, 1.05vh, 10px);top:clamp(13px, 2.2vh, 22px)}
+
+  /* Wenig Bildhöhe: Details ausdünnen */
+  @media (max-height:620px){ .box .sub{display:none} .laneSub{display:none} }
+  @media (max-height:520px){ .lane[data-lane="ecg2"]{display:none} }
+  @media (max-height:400px){ .lane[data-lane="resp"]{display:none} .meta{display:none} }
+  /* Schmales Bild: Kopfzeilen-Details weglassen */
+  @media (max-width:1150px){ .meta span:nth-child(n+4){display:none} }
+  @media (max-width:860px){ .meta{display:none} }
+  /* Hochkant montierter Bildschirm: Zahlenfelder unter die Kurven */
+  @media (max-aspect-ratio:5/6){
+    main{flex-direction:column}
+    #nums{flex:0 0 32vh;flex-direction:row;flex-wrap:wrap;border-left:none;border-top:1px solid var(--line)}
+    #nums .box{flex:1 1 30%;min-width:28%}
+    .box .val{font-size:clamp(20px, 4.6vh, 46px)}
+    .box.small .val{font-size:clamp(18px, 3.6vh, 36px)}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <header>
+    <div class="bed">BETT <span class="editable" contenteditable="true" id="bed">04</span></div>
+    <div id="patName" contenteditable="true" spellcheck="false">Mustermann, Erika</div>
+    <div class="meta">
+      <span>ID <b class="editable" contenteditable="true">P-8842193</b></span>
+      <span>Geb. <b class="editable" contenteditable="true">14.03.1961</b></span>
+      <span><b class="editable" contenteditable="true">W</b></span>
+      <span><b class="editable" contenteditable="true">65 J</b></span>
+      <span><b class="editable" contenteditable="true">72 kg</b></span>
+    </div>
+    <div class="spacer"></div>
+    <div id="alarmBanner">** APNOE</div>
+    <div class="statusIcons">
+      <div id="icSound">TON AUS</div>
+      <div id="icAlarm">ALARM EIN</div>
+    </div>
+    <div class="clock"><span id="clock">00:00:00</span><small id="date">01.01.2026</small></div>
+  </header>
+
+  <main>
+    <div id="waves">
+      <div class="lane grid" data-lane="ecg">
+        <div class="laneLabel" style="color:var(--ecg)">I I</div>
+        <div class="laneSub">×1.0  25 mm/s</div>
+        <canvas></canvas>
+      </div>
+      <div class="lane grid" data-lane="ecg2">
+        <div class="laneLabel" style="color:var(--ecg)">V5</div>
+        <div class="laneSub">×1.0</div>
+        <canvas></canvas>
+      </div>
+      <div class="lane grid" data-lane="pleth">
+        <div class="laneLabel" style="color:var(--spo2)">SpO₂ PLETH</div>
+        <canvas></canvas>
+      </div>
+      <div class="lane grid" data-lane="art">
+        <div class="laneLabel" style="color:var(--art)">ART</div>
+        <div class="laneSub">0 – 200 mmHg</div>
+        <canvas></canvas>
+      </div>
+      <div class="lane grid" data-lane="co2">
+        <div class="laneLabel" style="color:var(--co2)">CO₂</div>
+        <div class="laneSub">0 – 60 mmHg</div>
+        <canvas></canvas>
+      </div>
+      <div class="lane grid" data-lane="resp">
+        <div class="laneLabel" style="color:var(--resp)">RESP</div>
+        <div class="laneSub">Impedanz</div>
+        <canvas></canvas>
+      </div>
+    </div>
+
+    <div id="nums">
+      <div class="box" data-p="hr" style="color:var(--ecg)">
+        <div class="key">1</div>
+        <div class="lbl">HF <span class="unit">bpm</span></div>
+        <div class="limits">120<br>50</div>
+        <div class="val" id="v_hr">76</div>
+        <div class="sub" id="s_hr">Sinusrhythmus</div>
+      </div>
+
+      <div class="box" data-p="spo2" style="color:var(--spo2)">
+        <div class="key">2</div>
+        <div class="lbl">SpO₂ <span class="unit">%</span></div>
+        <div class="limits">100<br>90</div>
+        <div class="val" id="v_spo2">98</div>
+        <div class="sub">PR <span id="s_pr">76</span>  ·  PI 3.4</div>
+      </div>
+
+      <div class="box small" data-p="nibp" style="color:var(--nibp)">
+        <div class="key">3</div>
+        <div class="lbl">NIBP <span class="unit">mmHg</span></div>
+        <div class="limits" id="nibpTime">14:02</div>
+        <div class="val" id="v_nibp">124/78</div>
+        <div class="sub">(<span id="s_map">93</span>)  ·  Auto 15 min</div>
+      </div>
+
+      <div class="box small" data-p="art" style="color:var(--art)">
+        <div class="key">4</div>
+        <div class="lbl">ART <span class="unit">mmHg</span></div>
+        <div class="limits">160<br>90</div>
+        <div class="val" id="v_art">126/74</div>
+        <div class="sub">(<span id="s_artmap">91</span>)</div>
+      </div>
+
+      <div class="box small" data-p="etco2" style="color:var(--co2)">
+        <div class="key">5</div>
+        <div class="lbl">etCO₂ <span class="unit">mmHg</span></div>
+        <div class="limits">50<br>25</div>
+        <div class="val" id="v_etco2">36</div>
+        <div class="sub">insp. CO₂ 0</div>
+      </div>
+
+      <div class="box small" data-p="rr" style="color:var(--resp)">
+        <div class="key">6</div>
+        <div class="lbl">AF <span class="unit">/min</span></div>
+        <div class="limits">30<br>8</div>
+        <div class="val" id="v_rr">14</div>
+        <div class="sub">Spontan</div>
+      </div>
+
+      <div class="box small" data-p="temp" style="color:var(--temp)">
+        <div class="key">7</div>
+        <div class="lbl">TEMP <span class="unit">°C</span></div>
+        <div class="limits">38.5<br>35.5</div>
+        <div class="val" id="v_temp">36.8</div>
+        <div class="sub">Blase</div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <span class="grp"><kbd>1</kbd>–<kbd>7</kbd> Parameter</span>
+    <span class="grp"><kbd>↑</kbd><kbd>↓</kbd> Wert  ·  <kbd>⇧</kbd>+<kbd>↑</kbd> grob</span>
+    <span class="grp"><kbd>N</kbd> Name</span>
+    <span class="grp"><kbd>V</kbd> Normal <kbd>T</kbd> Tachy <kbd>B</kbd> Brady <kbd>S</kbd> Schock <kbd>I</kbd> Infarkt <kbd>F</kbd> VF <kbd>A</kbd> Asystolie</span>
+    <span class="spacer" style="flex:1"></span>
+    <span class="grp"><kbd>D</kbd> Vollbild  ·  <kbd>H</kbd> Hilfe</span>
+  </footer>
+</div>
+
+<div id="toast"></div>
+<div id="startHint">D = VOLLBILD  ·  L = BEDIENLEISTE  ·  H = HILFE</div>
+
+<div id="help">
+  <div class="card">
+    <h2>PATIENTENMONITOR — TASTENBELEGUNG</h2>
+    <p class="hint">Mit <kbd>H</kbd> oder Klick schließen. Alle Texte in der Kopfzeile sind direkt anklickbar und editierbar.</p>
+    <div class="cols">
+      <div>
+        <h3>WERTE STEUERN</h3>
+        <table>
+          <tr><td><kbd>1</kbd>…<kbd>7</kbd></td><td>Parameter auswählen (HF, SpO₂, NIBP, ART, etCO₂, AF, Temp)</td></tr>
+          <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>Parameter durchblättern</td></tr>
+          <tr><td><kbd>↑</kbd> <kbd>↓</kbd></td><td>Wert um 1 ändern (Temp 0,1)</td></tr>
+          <tr><td><kbd>⇧</kbd>+<kbd>↑↓</kbd></td><td>Wert um 5 ändern (Temp 0,5)</td></tr>
+          <tr><td><kbd>,</kbd> <kbd>.</kbd></td><td>bei NIBP/ART: Diastole senken/erhöhen</td></tr>
+          <tr><td><kbd>Enter</kbd></td><td>NIBP-Messung manuell starten</td></tr>
+        </table>
+        <h3>PATIENTENDATEN</h3>
+        <table>
+          <tr><td><kbd>N</kbd></td><td>Namensfeld bearbeiten (Enter = fertig)</td></tr>
+          <tr><td>Klick</td><td>ID, Geburtsdatum, Bett, Gewicht ändern</td></tr>
+        </table>
+      </div>
+      <div>
+        <h3>SZENARIEN</h3>
+        <table>
+          <tr><td><kbd>V</kbd></td><td>Normalbefund / stabiler Patient</td></tr>
+          <tr><td><kbd>T</kbd></td><td>Sinustachykardie (HF 140)</td></tr>
+          <tr><td><kbd>B</kbd></td><td>Bradykardie (HF 38)</td></tr>
+          <tr><td><kbd>S</kbd></td><td>Schock / Hypotonie</td></tr>
+          <tr><td><kbd>I</kbd></td><td>Myokardinfarkt, ST-Hebung</td></tr>
+          <tr><td><kbd>K</kbd></td><td>Vorhofflimmern, unregelmäßig</td></tr>
+          <tr><td><kbd>W</kbd></td><td>Ventrikuläre Tachykardie</td></tr>
+          <tr><td><kbd>F</kbd></td><td>Kammerflimmern</td></tr>
+          <tr><td><kbd>A</kbd></td><td>Asystolie / Nulllinie</td></tr>
+          <tr><td><kbd>X</kbd></td><td>Einzelne Extrasystole auslösen</td></tr>
+        </table>
+        <h3>MONITOR</h3>
+        <table>
+          <tr><td><kbd>D</kbd> / <kbd>F11</kbd> / Doppelklick</td><td>Vollbild ein/aus</td></tr>
+          <tr><td><kbd>L</kbd></td><td>Bühnenmodus / Bedienleiste umschalten</td></tr>
+          <tr><td><kbd>P</kbd></td><td>Pulston an/aus (Tonhöhe folgt SpO₂)</td></tr>
+          <tr><td><kbd>M</kbd></td><td>Alarm stumm / aktiv</td></tr>
+          <tr><td><kbd>G</kbd></td><td>Raster ein/aus</td></tr>
+          <tr><td><kbd>Leertaste</kbd></td><td>Kurven einfrieren</td></tr>
+          <tr><td><kbd>H</kbd></td><td>diese Hilfe</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+"use strict";
+
+/* ############################################################
+   ##  KONFIGURATION — hier alles anpassen, was am Set gilt.
+   ##  Datei in einem Texteditor öffnen, Werte ändern, speichern.
+   ############################################################ */
+const CONFIG = {
+  /* --- Patientendaten in der Kopfzeile --- */
+  name:      "Mustermann, Erika",
+  bett:      "04",
+  id:        "P-8842193",
+  geburt:    "14.03.1961",
+  geschlecht:"W",
+  alter:     "65 J",
+  gewicht:   "72 kg",
+
+  /* --- Startwerte --- */
+  startSzenario: "normal",   // normal | tachy | brady | shock | mi | afib | vt | vf | asystole
+
+  /* --- Bühnenmodus --- */
+  buehnenmodus:   true,   // true = nur reine Monitoroberfläche (keine Leiste, keine Hinweise)
+  starthinweis:   true,   // kleiner Tastenhinweis unten rechts für 6 Sekunden
+  mauszeigerAus:  true,   // Mauszeiger nach 3 s Ruhe ausblenden
+  pulston:        false,  // Pulston beim Start aktiv (Browser erlaubt Ton oft erst nach 1. Tastendruck)
+  alarmeAktiv:    true,   // Grenzwert-Alarme (rot blinkende Felder) an
+  raster:         true,   // Millimeterraster hinter den Kurven
+
+  /* --- Darstellung --- */
+  sweepSekunden:  7,      // wie lange ein Kurvendurchlauf über den Bildschirm braucht
+  nibpIntervallMin: 15    // automatische Blutdruckmessung alle X Minuten (0 = aus)
+};
+/* ####################  ENDE KONFIGURATION  #################### */
+
+/* ======================= Zustand ======================= */
+const S = {
+  hr: 76, spo2: 98,
+  nibpSys: 124, nibpDia: 78, nibpAt: null,
+  artSys: 126, artDia: 74,
+  etco2: 36, rr: 14, temp: 36.8,
+  rhythm: "sinus",          // sinus | afib | vt | vf | asystole
+  st: 0,                    // ST-Hebung in mV
+  pvc: false,               // nächster Schlag = Extrasystole
+  sound: false, alarmOn: true, muted: false, frozen: false, grid: true,
+  clean: true, sel: "hr",
+  rhythmLabel: "Sinusrhythmus"
+};
+
+const PARAMS = ["hr","spo2","nibp","art","etco2","rr","temp"];
+const LIMITS = {
+  hr:[50,120], spo2:[90,100], nibp:[80,160], art:[90,160],
+  etco2:[25,50], rr:[8,30], temp:[35.5,38.5]
+};
+
+/* ======================= Simulation ======================= */
+const SIM = {
+  beatT: 0, beatDur: 60/76,
+  breathT: 0, breathDur: 60/14,
+  vfPhase: 0, t: 0, pvcNow: false
+};
+
+const rnd = (a,b) => a + Math.random()*(b-a);
+const gauss = (x,mu,s) => Math.exp(-((x-mu)*(x-mu))/(2*s*s));
+const clamp = (v,a,b) => Math.min(b,Math.max(a,v));
+
+function ecgNormal(t, pvc){
+  if (pvc){
+    let y = 0;
+    y += 1.15*gauss(t,0.10,0.030);
+    y += -0.75*gauss(t,0.17,0.038);
+    y += -0.35*gauss(t,0.30,0.060);
+    return y;
+  }
+  let y = 0;
+  if (S.rhythm !== "afib") y += 0.13*gauss(t,0.09,0.023);
+  y += -0.09*gauss(t,0.163,0.0075);
+  y +=  1.00*gauss(t,0.182,0.0080);
+  y += -0.24*gauss(t,0.203,0.0105);
+  if (t > 0.205 && t < 0.31) y += S.st;
+  y += (0.27 + S.st*0.6)*gauss(t,0.335,0.040);
+  if (S.rhythm === "afib" && t < 0.15) y += 0.035*Math.sin(t*160);
+  return y;
+}
+function ecgVT(t,dur){
+  const u = t/dur;
+  return 0.85*Math.sin(u*Math.PI*2 - Math.PI/2) + 0.18*Math.sin(u*Math.PI*4);
+}
+function ecgVF(){
+  const p = SIM.vfPhase;
+  return 0.42*Math.sin(p*2*Math.PI*5.1) + 0.28*Math.sin(p*2*Math.PI*8.3+1.1)
+       + 0.18*Math.sin(p*2*Math.PI*3.2+2.3) + 0.10*Math.sin(p*2*Math.PI*13.7);
+}
+function pulseShape(u){
+  if (u < 0) u += 1;
+  let y = 0;
+  y += 1.00*gauss(u,0.20,0.085);
+  y += 0.34*gauss(u,0.44,0.105);
+  y += 0.10*gauss(u,0.66,0.16);
+  return clamp(y,0,1.35)/1.06;
+}
+function capnoShape(u){
+  if (u < 0.30) return 0.0;
+  if (u < 0.38) { const k=(u-0.30)/0.08; return Math.pow(k,0.55)*0.93; }
+  if (u < 0.76) { const k=(u-0.38)/0.38; return 0.93 + 0.07*k; }
+  if (u < 0.84) { const k=(u-0.76)/0.08; return (1-k)*(1-k); }
+  return 0.0;
+}
+
+/* ======================= Kurvenkanäle ======================= */
+const CH = {
+  ecg:  {color:"#22ff5a", min:-0.55, max:1.35, w:2.0},
+  ecg2: {color:"#22ff5a", min:-0.55, max:1.35, w:1.6},
+  pleth:{color:"#31e7ff", min:-0.06, max:1.10, w:2.0},
+  art:  {color:"#ff3b3b", min:0,     max:200,  w:2.0},
+  co2:  {color:"#f2f2f2", min:-2,    max:60,   w:2.0},
+  resp: {color:"#ffe234", min:-1.25, max:1.25, w:1.8}
+};
+
+function sample(name){
+  const beatDur = SIM.beatDur, t = SIM.beatT;
+  switch(name){
+    case "ecg":
+    case "ecg2": {
+      let y;
+      if (S.rhythm === "asystole")      y = rnd(-0.012,0.012);
+      else if (S.rhythm === "vf")       y = ecgVF() + rnd(-0.02,0.02);
+      else if (S.rhythm === "vt")       y = ecgVT(t,beatDur);
+      else                              y = ecgNormal(t, SIM.pvcNow) + rnd(-0.008,0.008);
+      if (name === "ecg2") y = y*0.72 - 0.03*(S.rhythm==="sinus"||S.rhythm==="afib"?1:0);
+      return y;
+    }
+    case "pleth": {
+      if (S.rhythm === "asystole" || S.rhythm === "vf") return rnd(-0.02,0.02);
+      const u = ((t - 0.16)/beatDur % 1 + 1) % 1;
+      const amp = 0.55 + (S.spo2-88)/32 * 0.45;
+      return pulseShape(u)*clamp(amp,0.25,1);
+    }
+    case "art": {
+      if (S.rhythm === "asystole") return S.artDia*0.35 + rnd(-1,1);
+      if (S.rhythm === "vf")       return S.artDia*0.4 + 6*Math.sin(SIM.vfPhase*40) + rnd(-2,2);
+      const u = ((t - 0.13)/beatDur % 1 + 1) % 1;
+      return S.artDia + (S.artSys - S.artDia)*pulseShape(u) + rnd(-0.6,0.6);
+    }
+    case "co2": {
+      const u = SIM.breathT / SIM.breathDur;
+      return capnoShape(u)*S.etco2 + rnd(-0.25,0.25);
+    }
+    case "resp": {
+      const u = SIM.breathT / SIM.breathDur;
+      return Math.sin(u*Math.PI*2 - Math.PI/2)*0.85 + 0.10*Math.sin(u*Math.PI*6) + rnd(-0.015,0.015);
+    }
+  }
+  return 0;
+}
+
+/* ======================= Zeichnen ======================= */
+const lanes = [];
+document.querySelectorAll(".lane").forEach(el => {
+  const cv = el.querySelector("canvas");
+  lanes.push({el, cv, ctx: cv.getContext("2d"), name: el.dataset.lane, x:0, py:null, w:0, h:0, off:false});
+});
+
+function resize(){
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  lanes.forEach(L => {
+    const r = L.el.getBoundingClientRect();
+    L.off = (r.width < 4 || r.height < 4);      // per Media-Query ausgeblendete Spur
+    if (L.off) return;
+    L.w = Math.max(10, Math.round(r.width));
+    L.h = Math.max(10, Math.round(r.height));
+    L.cv.width = Math.round(L.w*dpr);
+    L.cv.height = Math.round(L.h*dpr);
+    L.ctx.setTransform(dpr,0,0,dpr,0,0);
+    L.ctx.lineWidth = CH[L.name].w;
+    L.ctx.lineJoin = "round";
+    L.ctx.lineCap = "round";
+    L.ctx.strokeStyle = CH[L.name].color;
+    L.ctx.clearRect(0,0,L.w,L.h);
+    L.x = 0; L.py = null;
+  });
+}
+let resizeTimer = null;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(resize, 120);
+});
+document.addEventListener("fullscreenchange", () => setTimeout(resize, 150));
+
+function yPix(L, v){
+  const c = CH[L.name];
+  const pad = 5;
+  const k = (v - c.min)/(c.max - c.min);
+  return L.h - pad - k*(L.h - 2*pad);
+}
+
+const SWEEP_SECONDS = CONFIG.sweepSekunden || 7;
+const STEP = 1/250;
+let acc = 0, last = performance.now();
+
+function simStep(dt){
+  SIM.t += dt;
+  SIM.vfPhase += dt;
+  if (S.rhythm === "vf" || S.rhythm === "asystole"){
+    SIM.beatT += dt;
+    if (SIM.beatT > 1) SIM.beatT = 0;
+  } else {
+    SIM.beatT += dt;
+    if (SIM.beatT >= SIM.beatDur){ SIM.beatT -= SIM.beatDur; newBeat(); }
+  }
+  SIM.breathT += dt;
+  if (SIM.breathT >= SIM.breathDur){
+    SIM.breathT -= SIM.breathDur;
+    SIM.breathDur = 60/clamp(S.rr,4,60) * rnd(0.94,1.06);
+  }
+}
+
+function newBeat(){
+  let base = 60/clamp(S.hr,20,260);
+  if (S.rhythm === "vt") base = 60/clamp(S.hr,120,260);
+  let f = (S.rhythm === "afib") ? rnd(0.68,1.34) : rnd(0.985,1.015);
+  SIM.pvcNow = S.pvc; S.pvc = false;
+  if (SIM.pvcNow) f *= 0.55;
+  SIM.beatDur = base*f;
+  if (!SIM.pvcNow && S.rhythm !== "vf" && S.rhythm !== "asystole") beep();
+}
+
+function frame(now){
+  const dtReal = Math.min((now - last)/1000, 0.25);
+  last = now;
+  if (!S.frozen){
+    acc += dtReal;
+    const eraseW = 26;
+    const active = lanes.filter(L => !L.off);
+    const pxPerSecArr = active.map(L => L.w / SWEEP_SECONDS);
+
+    active.forEach(L => { L.ctx.beginPath(); L.started = false; });
+
+    let steps = 0;
+    while (acc >= STEP && steps < 900){
+      acc -= STEP; steps++;
+      simStep(STEP);
+      active.forEach((L,i) => {
+        const nx = L.x + pxPerSecArr[i]*STEP;
+        const y = yPix(L, sample(L.name));
+        if (nx >= L.w){
+          if (L.started){ L.ctx.stroke(); L.ctx.beginPath(); L.started=false; }
+          L.x = 0; L.py = y;
+          L.ctx.clearRect(0,0,eraseW,L.h);
+          return;
+        }
+        L.ctx.clearRect(nx, 0, eraseW, L.h);
+        if (L.py === null) L.py = y;
+        if (!L.started){ L.ctx.moveTo(L.x, L.py); L.started = true; }
+        L.ctx.lineTo(nx, y);
+        L.x = nx; L.py = y;
+      });
+    }
+    active.forEach(L => { if (L.started) L.ctx.stroke(); });
+  }
+  requestAnimationFrame(frame);
+}
+
+/* ======================= Anzeigewerte ======================= */
+let drift = {hr:0, spo2:0, rr:0, etco2:0, art:0, temp:0};
+setInterval(() => {
+  drift.hr   = Math.round(rnd(-1.4,1.4));
+  drift.spo2 = Math.random() < 0.5 ? 0 : (Math.random()<0.5?-1:1);
+  drift.rr   = Math.random() < 0.6 ? 0 : (Math.random()<0.5?-1:1);
+  drift.etco2= Math.round(rnd(-1,1));
+  drift.art  = Math.round(rnd(-2,2));
+  drift.temp = rnd(-0.05,0.05);
+}, 2200);
+
+const $ = id => document.getElementById(id);
+
+function showHR(){
+  if (S.rhythm === "asystole") return 0;
+  if (S.rhythm === "vf") return "- - -";
+  return clamp(Math.round(S.hr + drift.hr),0,300);
+}
+
+function refresh(){
+  const dead = (S.rhythm === "asystole" || S.rhythm === "vf");
+  $("v_hr").textContent = showHR();
+  $("s_hr").textContent = S.rhythmLabel;
+
+  $("v_spo2").textContent = dead ? "- -" : clamp(Math.round(S.spo2 + drift.spo2),0,100);
+  $("s_pr").textContent = dead ? "- -" : showHR();
+
+  $("v_nibp").textContent = S.nibpSys + "/" + S.nibpDia;
+  $("s_map").textContent  = Math.round((S.nibpSys + 2*S.nibpDia)/3);
+
+  const asys = dead ? Math.round(S.artDia*0.4) : clamp(S.artSys + drift.art,0,300);
+  const adia = dead ? Math.round(S.artDia*0.35) : clamp(S.artDia + Math.round(drift.art/2),0,220);
+  $("v_art").textContent = asys + "/" + adia;
+  $("s_artmap").textContent = Math.round((asys + 2*adia)/3);
+
+  $("v_etco2").textContent = dead ? 0 : clamp(S.etco2 + drift.etco2,0,99);
+  $("v_rr").textContent    = clamp(S.rr + drift.rr,0,80);
+  $("v_temp").textContent  = (S.temp + drift.temp).toFixed(1);
+
+  document.querySelectorAll(".box").forEach(b => b.classList.toggle("sel", b.dataset.p === S.sel));
+
+  const alarms = [];
+  const chk = (p, val, txt) => {
+    const [lo,hi] = LIMITS[p];
+    const bad = (typeof val === "number") && (val < lo || val > hi);
+    const box = document.querySelector('.box[data-p="'+p+'"]');
+    box.classList.toggle("alarm", S.alarmOn && bad);
+    if (S.alarmOn && bad) alarms.push(txt + (val < lo ? " NIEDRIG" : " HOCH"));
+  };
+  chk("hr", dead ? -1 : S.hr, "HF");
+  chk("spo2", dead ? -1 : S.spo2, "SpO₂");
+  chk("nibp", S.nibpSys, "NIBP SYS");
+  chk("art", dead ? -1 : S.artSys, "ART SYS");
+  chk("etco2", dead ? -1 : S.etco2, "etCO₂");
+  chk("rr", S.rr, "AF");
+  chk("temp", S.temp, "TEMP");
+
+  let banner = "";
+  if (S.rhythm === "asystole") banner = "*** ASYSTOLIE";
+  else if (S.rhythm === "vf")  banner = "*** KAMMERFLIMMERN";
+  else if (S.rhythm === "vt")  banner = "*** VENTRIKULÄRE TACHYKARDIE";
+  else if (alarms.length)      banner = "** " + alarms.slice(0,2).join("   ** ");
+
+  const b = $("alarmBanner");
+  if (banner && S.alarmOn){
+    b.textContent = banner + (S.muted ? "   (stumm)" : "");
+    b.classList.add("on","blink");
+  } else {
+    b.classList.remove("on","blink");
+  }
+
+  $("icSound").textContent = S.sound ? "PULSTON EIN" : "TON AUS";
+  $("icSound").classList.toggle("on", S.sound);
+  $("icAlarm").textContent = S.muted ? "ALARM STUMM" : (S.alarmOn ? "ALARM EIN" : "ALARM AUS");
+  $("icAlarm").classList.toggle("on", S.alarmOn && !S.muted);
+}
+setInterval(refresh, 400);
+
+setInterval(() => {
+  const d = new Date();
+  const p = n => String(n).padStart(2,"0");
+  $("clock").textContent = p(d.getHours())+":"+p(d.getMinutes())+":"+p(d.getSeconds());
+  $("date").textContent  = p(d.getDate())+"."+p(d.getMonth()+1)+"."+d.getFullYear();
+}, 500);
+
+function measureNIBP(){
+  S.nibpSys = clamp(Math.round(S.artSys + rnd(-6,6)),40,260);
+  S.nibpDia = clamp(Math.round(S.artDia + rnd(-5,5)),20,160);
+  const d = new Date(), p = n => String(n).padStart(2,"0");
+  $("nibpTime").textContent = p(d.getHours())+":"+p(d.getMinutes());
+  toast("NIBP-Messung: " + S.nibpSys + "/" + S.nibpDia + " mmHg");
+  refresh();
+}
+if (CONFIG.nibpIntervallMin > 0) setInterval(measureNIBP, CONFIG.nibpIntervallMin*60*1000);
+
+/* ======================= Ton ======================= */
+let actx = null;
+function beep(){
+  if (!S.sound) return;
+  try{
+    if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+    const o = actx.createOscillator(), g = actx.createGain();
+    const f = 520 + (clamp(S.spo2,80,100)-90)*22;
+    o.type = "sine"; o.frequency.value = f;
+    g.gain.setValueAtTime(0.0001, actx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.16, actx.currentTime + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + 0.085);
+    o.connect(g); g.connect(actx.destination);
+    o.start(); o.stop(actx.currentTime + 0.1);
+  }catch(e){}
+}
+
+/* ======================= Szenarien ======================= */
+function scenario(k){
+  switch(k){
+    case "normal":
+      Object.assign(S,{hr:76,spo2:98,artSys:126,artDia:74,nibpSys:124,nibpDia:78,
+        etco2:36,rr:14,temp:36.8,rhythm:"sinus",st:0,rhythmLabel:"Sinusrhythmus"});
+      toast("Szenario: Normalbefund"); break;
+    case "tachy":
+      Object.assign(S,{hr:142,spo2:95,artSys:148,artDia:88,etco2:33,rr:24,temp:38.4,
+        rhythm:"sinus",st:0,rhythmLabel:"Sinustachykardie"});
+      toast("Szenario: Sinustachykardie"); break;
+    case "brady":
+      Object.assign(S,{hr:38,spo2:94,artSys:96,artDia:56,etco2:34,rr:10,temp:35.9,
+        rhythm:"sinus",st:0,rhythmLabel:"Sinusbradykardie"});
+      toast("Szenario: Bradykardie"); break;
+    case "shock":
+      Object.assign(S,{hr:132,spo2:88,artSys:72,artDia:41,nibpSys:74,nibpDia:42,
+        etco2:24,rr:29,temp:35.2,rhythm:"sinus",st:0,rhythmLabel:"Tachykard, hypoton"});
+      toast("Szenario: Schock / Hypotonie"); break;
+    case "mi":
+      Object.assign(S,{hr:98,spo2:93,artSys:158,artDia:92,etco2:35,rr:22,temp:36.9,
+        rhythm:"sinus",st:0.28,rhythmLabel:"ST-Hebung"});
+      toast("Szenario: Myokardinfarkt, ST-Hebung"); break;
+    case "afib":
+      Object.assign(S,{hr:118,spo2:95,artSys:118,artDia:70,etco2:35,rr:18,
+        rhythm:"afib",st:0,rhythmLabel:"Vorhofflimmern"});
+      toast("Szenario: Vorhofflimmern"); break;
+    case "vt":
+      Object.assign(S,{hr:186,spo2:86,artSys:78,artDia:48,etco2:22,rr:26,
+        rhythm:"vt",st:0,rhythmLabel:"VT"});
+      toast("Szenario: Ventrikuläre Tachykardie"); break;
+    case "vf":
+      Object.assign(S,{spo2:0,artSys:24,artDia:16,etco2:8,rr:0,rhythm:"vf",st:0,
+        rhythmLabel:"Kammerflimmern"});
+      toast("Szenario: Kammerflimmern"); break;
+    case "asystole":
+      Object.assign(S,{hr:0,spo2:0,artSys:12,artDia:8,etco2:0,rr:0,rhythm:"asystole",st:0,
+        rhythmLabel:"Asystolie"});
+      toast("Szenario: Asystolie"); break;
+  }
+  SIM.beatDur = 60/clamp(S.hr||60,20,260);
+  SIM.breathDur = 60/clamp(S.rr||12,4,60);
+  refresh();
+}
+
+/* ======================= Bedienung ======================= */
+function adjust(dir, coarse, dia){
+  const step = coarse ? 5 : 1;
+  const p = S.sel;
+  if (p === "hr"){
+    S.hr = clamp(S.hr + dir*step, 0, 260);
+    if (S.rhythm === "asystole" || S.rhythm === "vf"){ S.rhythm = "sinus"; S.rhythmLabel = "Sinusrhythmus"; }
+    if (S.rhythm === "sinus")
+      S.rhythmLabel = S.hr > 100 ? "Sinustachykardie" : S.hr < 60 ? "Sinusbradykardie" : "Sinusrhythmus";
+  }
+  else if (p === "spo2") S.spo2 = clamp(S.spo2 + dir*step, 0, 100);
+  else if (p === "nibp"){
+    if (dia) S.nibpDia = clamp(S.nibpDia + dir*step, 10, S.nibpSys-5);
+    else { S.nibpSys = clamp(S.nibpSys + dir*step, 30, 300); S.nibpDia = Math.min(S.nibpDia, S.nibpSys-5); }
+  }
+  else if (p === "art"){
+    if (dia) S.artDia = clamp(S.artDia + dir*step, 5, S.artSys-5);
+    else { S.artSys = clamp(S.artSys + dir*step, 20, 300); S.artDia = Math.min(S.artDia, S.artSys-5); }
+  }
+  else if (p === "etco2") S.etco2 = clamp(S.etco2 + dir*step, 0, 99);
+  else if (p === "rr")    { S.rr = clamp(S.rr + dir*step, 0, 60); SIM.breathDur = 60/clamp(S.rr,4,60); }
+  else if (p === "temp")  S.temp = clamp(S.temp + dir*(coarse?0.5:0.1), 25, 43);
+  refresh();
+}
+
+let toastTimer = null;
+function toast(msg){
+  if (S.clean) return;
+  const t = $("toast");
+  t.textContent = msg; t.classList.add("on");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("on"), 2200);
+}
+
+let selTimer = null;
+function flashSel(){
+  if (!S.clean) return;
+  document.body.classList.add("showsel");
+  clearTimeout(selTimer);
+  selTimer = setTimeout(() => document.body.classList.remove("showsel"), 2500);
+}
+
+let curTimer = null;
+function cursorActivity(){
+  if (!CONFIG.mauszeigerAus) return;
+  document.body.classList.remove("hidecursor");
+  clearTimeout(curTimer);
+  curTimer = setTimeout(() => document.body.classList.add("hidecursor"), 3000);
+}
+window.addEventListener("mousemove", cursorActivity);
+cursorActivity();
+
+function toggleFullscreen(){
+  if (!document.fullscreenElement){
+    const el = document.documentElement;
+    (el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen).call(el);
+  } else {
+    (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+  }
+}
+
+const nameEl = $("patName");
+function editingText(){
+  const a = document.activeElement;
+  return a && a.isContentEditable;
+}
+
+document.addEventListener("keydown", e => {
+  if (editingText()){
+    if (e.key === "Enter" || e.key === "Escape"){ e.preventDefault(); document.activeElement.blur(); }
+    return;
+  }
+  const k = e.key;
+  const idx = PARAMS.indexOf(S.sel);
+
+  if (k >= "1" && k <= "7"){ S.sel = PARAMS[+k - 1]; flashSel(); refresh(); e.preventDefault(); return; }
+
+  switch(k){
+    case "ArrowUp":    adjust(+1, e.shiftKey); flashSel(); e.preventDefault(); return;
+    case "ArrowDown":  adjust(-1, e.shiftKey); flashSel(); e.preventDefault(); return;
+    case "ArrowRight": S.sel = PARAMS[(idx+1)%PARAMS.length]; flashSel(); refresh(); e.preventDefault(); return;
+    case "ArrowLeft":  S.sel = PARAMS[(idx-1+PARAMS.length)%PARAMS.length]; flashSel(); refresh(); e.preventDefault(); return;
+    case ",":          adjust(-1, e.shiftKey, true); return;
+    case ".":          adjust(+1, e.shiftKey, true); return;
+    case "Enter":      measureNIBP(); e.preventDefault(); return;
+    case " ":
+      S.frozen = !S.frozen;
+      document.body.classList.toggle("frozen", S.frozen);
+      toast(S.frozen ? "Kurven eingefroren" : "Kurven laufen");
+      e.preventDefault(); return;
+  }
+
+  switch(k.toLowerCase()){
+    case "n":
+      e.preventDefault();
+      nameEl.focus();
+      document.getSelection().selectAllChildren(nameEl);
+      toast("Name bearbeiten – Enter zum Übernehmen");
+      return;
+    case "v": scenario("normal"); return;
+    case "t": scenario("tachy"); return;
+    case "b": scenario("brady"); return;
+    case "s": scenario("shock"); return;
+    case "i": scenario("mi"); return;
+    case "k": scenario("afib"); return;
+    case "w": scenario("vt"); return;
+    case "f": scenario("vf"); return;
+    case "a": scenario("asystole"); return;
+    case "x": S.pvc = true; toast("Extrasystole"); return;
+    case "p":
+      S.sound = !S.sound;
+      if (S.sound && !actx){ try{ actx = new (window.AudioContext||window.webkitAudioContext)(); }catch(_){} }
+      toast(S.sound ? "Pulston ein" : "Pulston aus"); refresh(); return;
+    case "m":
+      S.muted = !S.muted; toast(S.muted ? "Alarm stummgeschaltet" : "Alarm aktiv"); refresh(); return;
+    case "g":
+      S.grid = !S.grid;
+      document.querySelectorAll(".lane").forEach(l => l.classList.toggle("grid", S.grid));
+      return;
+    case "l":
+      S.clean = !S.clean;
+      document.body.classList.toggle("clean", S.clean);
+      if (!S.clean){ document.body.classList.remove("hidecursor"); toast("Bedienmodus – Leiste sichtbar"); }
+      else flashSel();
+      setTimeout(resize, 60);
+      return;
+    case "h": case "?":
+      $("help").classList.toggle("on"); return;
+    case "d":
+      toggleFullscreen(); return;
+  }
+});
+
+$("help").addEventListener("click", () => $("help").classList.remove("on"));
+document.querySelectorAll(".box").forEach(b => {
+  b.addEventListener("click", () => { S.sel = b.dataset.p; refresh(); });
+});
+$("waves").addEventListener("dblclick", toggleFullscreen);
+nameEl.addEventListener("blur", () => {
+  if (!nameEl.textContent.trim()) nameEl.textContent = "Unbekannt, m/w";
+});
+
+/* ======================= Start ======================= */
+function applyConfig(){
+  nameEl.textContent = CONFIG.name;
+  $("bed").textContent = CONFIG.bett;
+  const m = document.querySelectorAll(".meta .editable");
+  if (m[0]) m[0].textContent = CONFIG.id;
+  if (m[1]) m[1].textContent = CONFIG.geburt;
+  if (m[2]) m[2].textContent = CONFIG.geschlecht;
+  if (m[3]) m[3].textContent = CONFIG.alter;
+  if (m[4]) m[4].textContent = CONFIG.gewicht;
+
+  S.clean   = !!CONFIG.buehnenmodus;
+  S.sound   = !!CONFIG.pulston;
+  S.alarmOn = !!CONFIG.alarmeAktiv;
+  S.grid    = !!CONFIG.raster;
+  document.body.classList.toggle("clean", S.clean);
+  document.querySelectorAll(".lane").forEach(l => l.classList.toggle("grid", S.grid));
+
+  scenario(CONFIG.startSzenario || "normal");
+
+  const hint = $("startHint");
+  if (CONFIG.starthinweis && S.clean){
+    setTimeout(() => hint.classList.add("off"), 6000);
+  } else {
+    hint.style.display = "none";
+  }
+  if (!S.clean) setTimeout(() => $("help").classList.add("on"), 400);
+}
+
+applyConfig();
+resize();
+refresh();
+requestAnimationFrame(frame);
+window.addEventListener("load", () => setTimeout(resize, 200));
+})();
+</script>
+</body>
+</html>
